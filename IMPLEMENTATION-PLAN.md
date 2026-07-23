@@ -47,17 +47,15 @@ feeds Wave 3's panel.
 
 ## Wave 2 — skills that scale
 
-### 2.1 Tool search escape hatch
+### 2.1 Tool search escape hatch — DONE (already existed upstream)
 **Read:** `reference/isair-jarvis/src/jarvis/tools/builtin/tool_search.spec.md`
 
-We have 136 skills and route by keyword. Adopt their two-stage model: narrow routing
-once before the loop, plus a `skill_search` tool the model can call to widen its own
-allow-list mid-conversation.
-
-- Cap at 3 calls per reply, mirroring their `tool_search_max_calls`.
-- Never remove `stop` or the search tool itself from the allow-list.
-- Note their explicit non-goal: it re-runs the *same* router, it is not a "dump every
-  tool" surface and not an authorisation bypass.
+Turns out this is moot for us: `jarvis_ear.py`'s `fast_lane()` is a single-shot completion
+with no tool loop at all — every actual tool call already routes through `agent_lane()` to
+the Hermes gateway, and `~/.hermes/hermes-agent/tools/tool_search.py` already implements a
+strictly more capable version of this than isair's: progressive disclosure with three
+bridge tools (`tool_search`/`tool_describe`/`tool_call`), a context-budget threshold gate,
+and a hard rule that core tools never defer. Nothing to port here.
 
 ### 2.2 Prompt-injection fencing for fetched content
 **Read:** `reference/isair-jarvis/src/jarvis/tools/builtin/web_search.spec.md`
@@ -84,31 +82,41 @@ We already log RSS, `footprint`, and brain latency. Add a proper panel: memory t
 counts (reflex / fast / agent / local), and restart events. This is the "see everything
 end to end" ask, backed by data we genuinely have.
 
-### 3.3 Metadata-driven, writable Settings
+### 3.3 Metadata-driven, writable Settings — DONE
 **Read:** `reference/isair-jarvis/src/desktop_app/settings_window.spec.md`
 
-Today Settings reads constants out of `jarvis_ear.py` by regex and is read-only. Move to
-a declared schema (name, type, range, default, help) that generates the UI *and* enables
-writing. Write only non-default values; preserve unknown keys; the daemon reloads on
-change.
+Adapted, not copied: isair's world has one config.json and six widget types; ours has
+top-level tunable constants inside `jarvis_ear.py`, so the registry is `ConfigReader.
+editableFields: [String: FieldMeta]` (min/max/step/isInt) and "write" means an anchored,
+comment-preserving single-line regex replace (`ConfigWriter.write`), never touching any
+other line. 11 numeric constants made writable (wake sensitivity, barge-in, RAM ceiling,
+timing windows); voice-engine names, audio-format constants (`RATE`/`CHUNK`), and the one
+computed-expression constant (`MIN_UPTIME_FOR_NIGHTLY = 20 * 3600`) stay read-only, same
+spirit as isair's own "Fields NOT Exposed in UI" list. `.env` stays fully read-only (out
+of scope, different risk class). Restart is a separate, explicit button — never automatic
+on save, matching their confirm-before-restart flow.
 
-### 3.4 Desktop companion overlay
+Caught and fixed during build: the first version used a Stepper, and one still-unexplained
+interaction wrote incorrect values (0.1/0.4) to the *live* daemon's actual source file
+mid-session, caught via `git diff` and immediately reverted (the daemon was never
+restarted while wrong, so its running behavior was never affected). Root cause wasn't
+pinned down with certainty, but a Stepper's continuous-press chevrons are a known-flaky
+control, so it was replaced with a plain type-and-commit TextField — a class of widget
+that cannot fire without deliberate typed input. Re-verified clean over a subsequent idle
+window with no interaction.
+
+### 3.4 Desktop companion overlay — DONE
 **Read:** `reference/ethanplusai-jarvis/desktop-overlay/JarvisOverlay.swift` (299 lines,
 read it fully — the window configuration is the whole trick)
 
-Port the *window mode*, not the stack:
+Ported the *window mode*, not the stack — same click-through, desktop-level, all-Spaces
+`NSWindow` configuration, but content is a native SwiftUI `Canvas` reusing our existing
+star/core rendering (no WKWebView, no Three.js, no CDN). `OverlayWindow.swift`.
 
-```
-window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
-window.isOpaque = false
-window.backgroundColor = .clear
-window.ignoresMouseEvents = true
-window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-```
-
-Content is a SwiftUI `Canvas` reusing our existing star and core rendering — no
-WKWebView, no Three.js, no CDN. A small always-present Jarvis presence sitting above the
-wallpaper and below every window, brightening when he is listening or speaking.
+Brightening on listening/speaking landed too: `jarvis_ear.py` now calls `write_state()` at
+every wake/thinking/working/speaking/idle transition, atomically to `state.json`; the
+overlay polls it once per animation frame (12fps) and falls back to idle on a stale
+(>30s) or missing file.
 
 ---
 
@@ -126,13 +134,57 @@ Adopt their `*.spec.md` convention for the load-bearing modules: barge-in, the r
 table, the recall gate, skill routing. A short contract next to the code, updated in the
 same commit as the behaviour.
 
-### 4.3 Hold-to-dictate
+### 4.3 Hold-to-dictate — DONE
 **Read:** `reference/isair-jarvis/src/jarvis/dictation/`
 
-Hold a hotkey, speak, release, text lands in the focused app. We already have Whisper
-resident; this is mostly hotkey capture plus paste. Their known caveat: `pynput` is
-broken on macOS 26 (Tahoe) — we are on Darwin 25, and should prefer a native event tap
-regardless.
+Hold Control+Option anywhere, speak, release, text lands in the focused app via
+clipboard + synthetic Cmd+V. `jarvis_dictation.py`, wired into `listen_loop()`'s boot
+sequence. Built on a native `Quartz` `CGEventTap` rather than `pynput` per this plan's own
+note (their spec documents a pynput crash on macOS 26/Tahoe; native avoids the landmine
+entirely rather than deferring it). Shares the daemon's already-loaded Whisper model —
+no second model instance.
+
+Verified end to end with a synthetic modifier-hold (not just unit tests): the live daemon
+recorded real ambient audio, transcribed it, and the result landed on the clipboard.
+
+Scope cut, documented in `jarvis_dictation.py`'s module docstring: no hands-free
+double-tap mode, no LLM filler-word removal (isair's calls a local Ollama instance we
+don't run). Custom-dictionary replacement shipped since it was one function's worth of
+work.
+
+---
+
+## Wave 5 — the last two ethanplusai/OpenJarvis gaps
+
+### 5.1 macOS Calendar/Reminders/Notes access — DONE
+**Read:** `reference/ethanplusai-jarvis/calendar_access.py`, `notes_access.py`
+
+Audited hermes-agent first (the actual execution engine behind `agent_lane()`) and
+confirmed this was genuinely missing — no Calendar/Mail/Notes/Reminders tool anywhere in
+`tools/*.py`. Per hermes-agent's own `AGENTS.md` footprint guidance, a personal macOS-only
+integration belongs in the **plugin** route, not core: shipped as
+`~/.hermes/plugins/macos_productivity/` (7 tools — `calendar_list_events` read-only,
+`reminders_list/create/complete`, `notes_search/read/create`). Notes never edits or
+deletes an existing note, matching ethanplusai's own stated safety precedent for that
+file. No Mail tool at all — out of scope, sensitive content class, wasn't worth the risk
+for this pass.
+
+Verified end to end through the *real* agent path, not just direct tool calls: restarted
+the `ai.hermes.gateway` launchd service so it picked up the newly-enabled plugin, then
+asked it (via `agent_lane()`, the same path voice queries take) to search Notes for a
+just-created test note and report its exact body back — content it could only have known
+by genuinely invoking `notes_search`/`notes_read`, not by guessing.
+
+### 5.2 Persistent/spawnable coding sessions — moot, already covered upstream
+**Read:** `reference/ethanplusai-jarvis/work_mode.py`
+
+hermes-agent's `AGENTS.md` already documents this exact pattern: `delegate_task(background=
+true)` for process-local durability, or `terminal(background=True, notify_on_complete=
+True)` when the work must survive a process restart. Both are already-registered,
+already-reachable tools — the same precedent as 2.1's tool_search finding. Nothing to
+port; ethanplusai's dedicated "work mode" abstraction is a thinner, less configurable
+version of what already exists here (no configurable concurrency caps, spawn-depth
+limits, or timeout knobs).
 
 ---
 
