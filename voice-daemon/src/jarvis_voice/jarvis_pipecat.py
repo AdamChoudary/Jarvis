@@ -7,7 +7,7 @@ first sentence, and you can barge in mid-reply.
 
   mic → SileroVAD → Whisper (local) → Zen north-mini (streaming) → Edge TTS → speakers
 
-Run:   ~/.hermes/hermes-agent/venv/bin/python ~/.hermes/jarvis-voice/jarvis_pipecat.py
+Run:   python -m jarvis_voice.jarvis_pipecat   (from voice-daemon/, with the package installed — see README)
 Stop:  Ctrl+C  (the wake-word daemon `jarvis_ear.py` keeps running independently)
 
 Escalation: like the ear daemon, replies of exactly "AGENT" hand the request to
@@ -15,7 +15,7 @@ the full Hermes agent (API server) and speak its answer when done.
 """
 import asyncio, os, subprocess, sys
 
-import jarvis_ear  # shared TTS engine chain (edge -> kokoro -> say)
+from . import jarvis_ear  # shared TTS engine chain (edge -> kokoro -> say)
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams

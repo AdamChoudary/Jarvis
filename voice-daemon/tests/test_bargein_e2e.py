@@ -11,7 +11,7 @@ import queue, subprocess, sys, tempfile, threading, time, wave
 
 import numpy as np
 
-import jarvis_ear as je
+from jarvis_voice import jarvis_ear as je
 
 
 def synth_frames(text, voice="en-US-GuyNeural"):

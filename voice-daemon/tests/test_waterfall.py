@@ -6,7 +6,7 @@ Run: ~/.hermes/hermes-agent/venv/bin/python test_waterfall.py
 """
 import sys
 sys.path.insert(0, "/Users/mac/.hermes/jarvis-voice")
-import jarvis_ear as je
+from jarvis_voice import jarvis_ear as je
 
 
 def test_ambient_path_transcribes_only():

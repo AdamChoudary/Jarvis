@@ -11,7 +11,7 @@ import subprocess, sys, tempfile, wave
 
 import numpy as np
 
-import jarvis_ear as je
+from jarvis_voice import jarvis_ear as je
 
 
 def synth_wav(text, voice="en-US-GuyNeural"):

@@ -17,9 +17,9 @@ Exit code is 0 only at 100%; the score line is the artefact to watch.
 import sys
 
 sys.path.insert(0, "/Users/mac/.hermes/jarvis-voice")
-import jarvis_ear as je
-from jarvis_recall import should_recall
-from jarvis_reflex import reflex
+from jarvis_voice import jarvis_ear as je
+from jarvis_voice.jarvis_recall import should_recall
+from jarvis_voice.jarvis_reflex import reflex
 
 PASS = 0
 FAIL = 0

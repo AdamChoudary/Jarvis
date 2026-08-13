@@ -19,9 +19,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # average test fixtures in with production turns — found live-mixed together
 # in the real log during a latency investigation.
 os.environ["JARVIS_TEST_MODE"] = "1"
-import jarvis_ear as je
-from jarvis_reflex import reflex
-from jarvis_recall import should_recall
+from jarvis_voice import jarvis_ear as je
+from jarvis_voice.jarvis_reflex import reflex
+from jarvis_voice.jarvis_recall import should_recall
 
 
 class FakeSpeaker:

@@ -19,18 +19,18 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import requests
 try:
-    from jarvis_memory_v7 import MemoryIndex, embed_query
+    from .jarvis_memory_v7 import MemoryIndex, embed_query
 except ImportError:
-    from jarvis_memory import MemoryIndex
+    from .jarvis_memory import MemoryIndex
     embed_query = None          # v6 fallback predates embeddings (TF-IDF only)
 
 try:
-    from jarvis_lightrag import LightRAG
+    from .jarvis_lightrag import LightRAG
 except ImportError:
     LightRAG = None
 
 try:
-    from jarvis_brain import get_brain
+    from .jarvis_brain import get_brain
 except ImportError:
     get_brain = None
 
@@ -38,13 +38,13 @@ except ImportError:
 # turn goes to the brain as before, and a missing gate means memory enrichment
 # always runs as before.
 try:
-    from jarvis_reflex import reflex
+    from .jarvis_reflex import reflex
 except ImportError:
     def reflex(_text):
         return None
 
 try:
-    from jarvis_recall import should_recall
+    from .jarvis_recall import should_recall
 except ImportError:
     def should_recall(_query, _history, window=6):
         return True
@@ -325,7 +325,7 @@ def distill_memory(history):
 
     # Nemori active distillation (with knowledge graph)
     try:
-        from jarvis_nemori import Nemori
+        from .jarvis_nemori import Nemori
         nemori = Nemori()
         result = nemori.distill(recent, mem)
         if result["facts"]:
@@ -1551,7 +1551,7 @@ def listen_loop():
     threading.Thread(target=_sensevoice_engine, daemon=True).start()  # emotional ear
     threading.Thread(target=ensure_acks, daemon=True).start()
     try:
-        from jarvis_dictation import start as start_dictation
+        from .jarvis_dictation import start as start_dictation
         start_dictation()               # isair/jarvis's hold-to-dictate, native CGEventTap
     except Exception as e:
         log(f"dictation unavailable: {e}")

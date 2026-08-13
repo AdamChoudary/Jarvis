@@ -5,10 +5,10 @@
 set -e
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT=8765
-VENV_PY="$HOME/.hermes/hermes-agent/venv/bin/python"
+VENV_PY="${JARVIS_VENV_PY:-$DIR/.venv/bin/python}"
 
 if ! curl -s -o /dev/null "http://127.0.0.1:$PORT/api/snapshot"; then
-  nohup "$VENV_PY" "$DIR/dashboard_server.py" "$PORT" \
+  nohup "$VENV_PY" "$DIR/src/jarvis_voice/dashboard_server.py" "$PORT" \
     > "$DIR/dashboard-server.log" 2>&1 &
   sleep 1
 fi

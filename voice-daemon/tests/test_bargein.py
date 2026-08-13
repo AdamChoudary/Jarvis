@@ -10,7 +10,7 @@ Run: ~/.hermes/hermes-agent/venv/bin/python test_bargein.py
 """
 import sys, time
 
-import jarvis_ear as je
+from jarvis_voice import jarvis_ear as je
 
 
 def test_interrupt_decrements_pending_for_drained_items():

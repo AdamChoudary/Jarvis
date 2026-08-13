@@ -38,7 +38,7 @@ from Quartz import (
 )
 from CoreFoundation import CFRunLoopRun
 
-import jarvis_ear as je
+from . import jarvis_ear as je
 
 # Modifier-only combo, matching isair's macOS default (WisprFlow-aligned).
 # ctrl+alt is the one preset in their list that never collides with a system
