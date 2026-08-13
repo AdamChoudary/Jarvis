@@ -1,0 +1,16 @@
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.jsonl
+models/
+acks/
+announce/
+history.json
+voices.json
+state.json
+.last-self-restart
+*.txt
+*.mp3
+*.wav
+__pycache__/

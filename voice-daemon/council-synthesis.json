@@ -1,0 +1,159 @@
+{
+  "architecture_summary": "SINGLE PROCESS, LAZY TIERS \u2014 not split-process. Verified against the live jarvis_ear.py (947 lines): the mention-trigger requires Whisper to transcribe every VAD-segmented ambient utterance (line ~761), so Whisper/wake-word/VAD must stay resident 24/7 \u2014 a subprocess \"brain\" split (Reliability Engineer's proposal) adds IPC complexity and a cold-start-vs-2-8s-latency gamble for a problem the in-process fix already solves. The Reliability Engineer is right that repeated load/unload of native CTranslate2/onnxruntime sessions is a real risk class, but the actual plan here never cycles Whisper (tier-0, loaded once, never unloaded) and only idle-unloads SenseVoice+TitaNet+Kokoro after the hot path is fixed first \u2014 so the risk that motivated their subprocess proposal is engineered away rather than isolated behind a process boundary. Keep it simple: one daemon, three tiers, timers gated on real activity signals already computed in the loop (rms noise-floor, last_exchange, VAD segment count). Ship in two waves: Wave 1 today (all zero-risk, code-confirmed one-liners + one real bug fix), Wave 2 after Wave 1 is measured stable for 48h (the hear() waterfall refactor + idle-unload timers, which change control flow and need a soak).",
+  "tier0_always_on": [
+    "openwakeword CNN (~183MB) \u2014 runs on every 80ms mic frame, no idle state exists to unload from",
+    "Silero VAD (~negligible) \u2014 required to segment audio for both wake and mention-trigger paths",
+    "faster-whisper base int8 (~517MB) \u2014 transcribes every ambient VAD segment for the mention-trigger ('Jarvis' anywhere in speech, not just after wake-word); unloading it causes reload-thrash on the next ambient sound in a chatty room, not rare stutter \u2014 confirmed by hear() being called from the always-on mention-check loop",
+    "Hermes gateway process (~186MB) \u2014 cron needs fixed wall-clock fires (08:00/08:30/09:15/hourly/22:00/Sun18:00) and agent_lane() escalation needs to stay warm for its 5-8s latency budget; under 200MB isn't worth cron-miss or escalation-latency risk"
+  ],
+  "tier1_lazy_idle_unload": [
+    "SenseVoice emotion model (~407MB) \u2014 ONLY after the hear() waterfall fix lands (transcript-only on the ambient gate; emotion+speaker-ID only run once name_mentioned() or a hard wake is confirmed). Idle-unload after 30 min of zero wake/mention/follow-up activity, keyed off last_exchange, checked inline in the existing frame loop (no new thread/timer) next to the IDLE_DISTILL_SECS check.",
+    "TitaNet speaker-ID (~0MB marginal, rides on SenseVoice's onnxruntime pool) \u2014 unload/reload paired 1:1 with SenseVoice, never targeted alone (confirmed decoy: isolated savings are ~0MB).",
+    "Kokoro TTS fallback (~381MB) \u2014 do NOT even idle-unload this, just stop eager-loading it (see Wave 1). It's genuinely load-on-first-use-forever, never re-unloaded, so no reload-race risk applies at all."
+  ],
+  "tier2_on_demand_only": [
+    "NeuTTS voice-cloning stack (neucodec 3.4G + w2v-bert-2.0 4.3G + neutts-air-q4-gguf 503M) \u2014 not loaded in RAM at all today, pure disk; delete from ~/.cache/huggingface/hub entirely, re-download (~10-15 min, proven once already) only if voice cloning is ever actually wired into a live path again",
+    "Duplicate SenseVoice fp32 model.onnx (938MB disk, code only ever opens model.int8.onnx \u2014 confirmed by grep) \u2014 delete, zero risk",
+    "Stray mlx-community/whisper-tiny cache (71MB, orphaned \u2014 jarvis_pipecat.py now requests whisper-base-mlx not -tiny) \u2014 delete, zero risk",
+    "Quiet-hours deep tier (23:00-08:00 unload Whisper+SenseVoice+Kokoro down to wake-word-only ~229MB, re-arm ~07:55 before 08:00 cron) \u2014 explicitly OFF by default / opt-in only (JARVIS_QUIET_HOURS=1); not part of the default ship since it touches Whisper, the one model every report agrees must not be casually tiered"
+  ],
+  "idle_unload_timeout_minutes": 30,
+  "target_idle_ram_mb": 1153,
+  "target_disk_gb": 4.2,
+  "ranked_actions": [
+    {
+      "title": "Fix real bug: unbounded in-memory conversation history (memory leak + growing LLM token cost/latency)",
+      "detail": "jarvis_ear.py:394 `history += [...]` mutates the same list object created once at daemon start (line 716) for the process's entire multi-day launchd-KeepAlive lifetime \u2014 save_history() (line 130) only trims the ON-DISK copy to 48 entries, never the in-memory list that fast_lane() sends verbatim to the LLM on every turn. This is a genuine correctness bug independent of the RAM/disk optimization, caught by the QA-lens reviewer and verified directly in the code. Fix: after `history += [...]` in dispatch() (line 396), add `del history[:-24]` before save_history(). One line, root-cause fix (dispatch() is the single call-through point for both main-turn and follow-up-turn history writes, so fixing it there covers every caller).",
+      "risk": "none \u2014 purely bounds an already-intended cap, no capability change",
+      "ram_saved_mb": 5,
+      "disk_saved_gb": 0,
+      "implement_now": true
+    },
+    {
+      "title": "Delete the eager Kokoro TTS preload (jarvis_ear.py:713)",
+      "detail": "`_kokoro_engine()` at listen_loop() line 713 force-loads Kokoro at daemon boot even though `_kokoro_engine()` (line 167) is already a correct lazy singleton and Kokoro is only ever invoked as the rare fallback when Edge-TTS fails. Delete the line. Every one of 10 reports independently confirmed this exact same finding against the live code \u2014 unanimous, highest-confidence item on the table. Kokoro loads itself correctly (1-2s) the first time Edge-TTS actually fails; since that moment already reads as a degraded/fallback moment to the user, the one-time load cost is invisible, not ghosting.",
+      "risk": "none",
+      "ram_saved_mb": 381,
+      "disk_saved_gb": 0,
+      "implement_now": true
+    },
+    {
+      "title": "Delete the eager speaker-ID (TitaNet) preload (jarvis_ear.py:723) \u2014 a twin bug none of the 10 reports flagged as symmetric to Kokoro's",
+      "detail": "`_speaker_engine()` is force-called at listen_loop() line 723 ('preload voice recognition'), exactly the same eager-defeats-lazy-singleton pattern as Kokoro at line 713 and exactly the same pattern already correctly identified for SenseVoice (which is instead preloaded on a background thread at line 714, not synchronously blocking startup). Since TitaNet's marginal RAM cost is ~0MB once SenseVoice's onnxruntime pool is warm (confirmed decoy by multiple reports), this delete doesn't save RAM by itself, but it removes an unnecessary blocking call from daemon startup and keeps the tier boundaries clean once SenseVoice becomes tier-1 in Wave 2 \u2014 TitaNet should load/unload paired with SenseVoice, not independently at boot. Change line 723's synchronous call to match line 714's pattern: `threading.Thread(target=_speaker_engine, daemon=True).start()`.",
+      "risk": "none \u2014 same lazy-singleton guard already exists and is exercised correctly elsewhere in this same file",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": true
+    },
+    {
+      "title": "Wrap all three hear() call sites in try/except",
+      "detail": "hear() at jarvis_ear.py:761 (ambient mention path, runs on ALL overheard speech 24/7), :792 (main conversation), and :837 (follow-up window) are the only call sites with no exception guard in the whole listen_loop, while downstream dispatch/agent-lane calls are already guarded (lines 813-828). An uncaught exception on the always-on ambient path kills the daemon, forcing launchd to reload the full ~1.5GB model stack from scratch. Add a guard (log + `continue`/skip-as-unheard) matching the existing dispatch() guard pattern. This is a reliability fix, not a RAM fix, but it rides along since Wave 1 already touches this file and it directly protects against the worst-case outcome (crash-reload loop) that would negate every RAM saving below.",
+      "risk": "none \u2014 only changes behavior on the exception path, which currently is 'crash the daemon'",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": true
+    },
+    {
+      "title": "Delete the 8.2GB unused NeuTTS voice-cloning cache",
+      "detail": "rm -rf ~/.cache/huggingface/hub/{models--neuphonic--neucodec, models--facebook--w2v-bert-2.0, models--neuphonic--neutts-air-q4-gguf}. Confirmed by grep across jarvis_ear.py and jarvis_pipecat.py: never imported, not on any live path, only referenced by a standalone cloning tool used once for a proof .wav that lives outside this cache path (~/.hermes/voices/clone-sample.wav) and is untouched by this deletion. Re-download is automatic (~10-15 min) on next real use. Unanimous across all 10 reports.",
+      "risk": "none to the live daemon; one-time re-download cost only if cloning is ever genuinely invoked again",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 8.2,
+      "implement_now": true
+    },
+    {
+      "title": "Delete duplicate SenseVoice fp32 model.onnx (938MB) and stray whisper-tiny mlx cache (71MB)",
+      "detail": "Code (verified) only ever opens model.int8.onnx for SenseVoice; the fp32 model.onnx sitting in the same models/ folder is dead weight. Separately, ~/.cache/huggingface/hub/models--mlx-community--whisper-tiny is an orphaned cache from an earlier experiment \u2014 jarvis_pipecat.py now requests whisper-base-mlx, not -tiny. Both zero-risk, unreferenced-by-any-current-code-path deletions.",
+      "risk": "none \u2014 verified unreferenced before deleting",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 1,
+      "implement_now": true
+    },
+    {
+      "title": "Security ride-along: move ZEN_KEY/NIM_KEY out of jarvis_ear.py source into the already-locked-down .env",
+      "detail": "jarvis_ear.py (mode 644, world-readable) hardcodes live plaintext API keys as source constants on lines ~60/63, while ~/.hermes/.env (mode 600) already holds the correct values unused. Since this file is being opened for surgery anyway (Wave 1 touches lines 394, 713, 723, 761/792/837), fix this in the same PR: read os.environ.get(\"OPENCODE_ZEN_KEY\")/os.environ.get(\"NVIDIA_API_KEY\") via a minimal .env loader, delete the hardcoded literals. Unrelated to RAM/disk but strictly reduces exposure at near-zero marginal cost given the file is already being edited.",
+      "risk": "none \u2014 strictly reduces exposure; verify the launchd plist doesn't need an EnvironmentVariables update since the daemon will read .env itself",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": true
+    },
+    {
+      "title": "Waterfall hear(): gate SenseVoice+TitaNet behind name_mentioned() on the ambient path",
+      "detail": "In hear() (line 672-680), the ambient mention-check call site (line 761) currently runs transcribe+analyze_voice+identify_speaker concurrently via a per-call ThreadPoolExecutor and blocks on all three, even though emotion/speaker-ID results are thrown away whenever the name wasn't mentioned (the common case \u2014 ear.log shows this firing repeatedly during normal room chatter). Change the line-761 call site to call `transcribe(whisper, seg)` alone first; only when `name_mentioned(text)` is true, submit analyze_voice()+identify_speaker() to populate the `first` tuple. Leave the line-792/837 in-conversation call sites using full hear() (all three outputs are genuinely wanted there). This is the PREREQUISITE that makes SenseVoice/TitaNet's idle-unload (next item) safe \u2014 without it, an idle-unload timer is neutral-to-harmful, since any room conversation forces both models hot again per-utterance regardless of an unload timer.",
+      "risk": "low \u2014 purely removes wasted work on the discard path; must confirm the enrichment call still populates the `first` tuple correctly before the real turn consumes it",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": false
+    },
+    {
+      "title": "Reuse one shared ThreadPoolExecutor for hear() instead of creating one per call",
+      "detail": "hear() (line 675) creates `with ThreadPoolExecutor(max_workers=3) as ex:` fresh on every call \u2014 fired on every ambient VAD segment plus every conversational turn, all day. Create the pool once at module scope (same pattern Speaker's pool already uses correctly at line 245) instead. Bundle with the Wave 2 hear() waterfall refactor since both touch the same function.",
+      "risk": "low",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": false
+    },
+    {
+      "title": "Idle-unload SenseVoice+TitaNet after 30 minutes of true silence, checked inline in the existing frame loop",
+      "detail": "AFTER the waterfall fix above ships and is confirmed stable, add: track `last_activity` (any wake/mention/follow-up event, already effectively tracked via `last_exchange`). Inline in the main `while True:` loop next to the existing IDLE_DISTILL_SECS check (line 736) \u2014 NOT a background threading.Timer \u2014 check `time.time() - last_activity > 1800` and if so, set `_sensevoice = None` and `_speaker = None` (not False \u2014 False means 'load failed, don't retry'). This is safe from races because hear() only ever runs synchronously from this same loop thread and fully joins its executor before returning control, so an inline check can never fire mid-inference. Mitigate reload latency (1-3s) with a background prewarm thread kicked off the instant the RMS noise-gate first trips (before VAD even finishes segmenting), giving the model a head start during the 1-3s a real utterance takes to record. DISSENT NOTE: this 30-minute number was chosen by the chair, overriding several council members' shorter suggestions (5-20 min) \u2014 see dissents.",
+      "risk": "medium if the waterfall prerequisite is skipped (thrash-reload on every ambient utterance in a chatty room); low if sequenced correctly with prewarm-on-noise-gate as backstop",
+      "ram_saved_mb": 407,
+      "disk_saved_gb": 0,
+      "implement_now": false
+    },
+    {
+      "title": "Add a timeout guard to _synth_kokoro()",
+      "detail": "_synth_edge (timeout=6) and _synth_say (timeout=20) both bound their subprocess calls; _synth_kokoro has none. A hang inside Kokoro's onnx inference permanently strands one of Speaker's only 2 playback worker threads. Wrap the call with a timeout matching the pattern of its siblings (~10-15s). Small, independent fix \u2014 can ship in Wave 1 if time allows, held to Wave 2 only because it's not RAM/disk-related and lower urgency than the crash-prevention try/except items.",
+      "risk": "low",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": false
+    },
+    {
+      "title": "REJECTED: idle-unload Whisper, openwakeword, or VAD",
+      "detail": "Every report that examined the mention-trigger mechanism (Architectural Engineer, Performance Specialist, Reliability Engineer, UX Advocate, Jarvis-as-tiebreaker) independently confirmed the same fact from the code: hear()'s transcribe() runs on every ambient VAD segment, not just post-wake-word ones, to power the 'say Jarvis anywhere' feature. Unloading Whisper on any idle timer guarantees a multi-second reload lands on the very next utterance in the room after any silence \u2014 which on a 24/7 daemon is most of the day \u2014 directly regressing the verified 2-8s wake-to-first-word budget and the mention-trigger. openwakeword runs on every single mic frame with no distinguishable 'idle' state to unload from. This is a hard guardrail, not a missed optimization.",
+      "risk": "n/a \u2014 this is a do-not-do, recorded so it isn't re-proposed",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": false
+    },
+    {
+      "title": "REJECTED (for default ship): quiet-hours-only deep tier (unload Whisper too, 23:00-08:00)",
+      "detail": "One report (Jarvis-as-tiebreaker) proposed unloading Whisper/SenseVoice/Kokoro entirely during 23:00-08:00 with a scheduled re-arm before the 08:00 cron. This is architecturally sound and low-risk in principle (nobody expects instant response at 3am) but is explicitly held out of the default ship: it's the one place Whisper \u2014 the model every other report says must never be tiered \u2014 gets touched, it requires correct re-arm scheduling with a real failure mode (missed 08:00 briefing on a bug), and it needs its own wake-during-transition guard. Ship it later as an opt-in (JARVIS_QUIET_HOURS=1 env flag) only after Wave 2's SenseVoice tiering has been running stable for a couple weeks and the team trusts the idle-unload machinery generally.",
+      "risk": "medium \u2014 re-arm scheduling failure mode directly risks the 08:00 briefing; deferred, not rejected outright",
+      "ram_saved_mb": 900,
+      "disk_saved_gb": 0,
+      "implement_now": false
+    },
+    {
+      "title": "REJECTED: split ear/wake/Whisper into one process and SenseVoice/TitaNet into an on-demand subprocess",
+      "detail": "The Reliability Engineer's subprocess-split proposal is sound engineering but solves a problem this plan avoids creating: their core worry (native onnxruntime/CTranslate2 session state not reliably released by Python del/GC across repeated load/unload cycles) only applies to a rung of complexity this plan doesn't climb \u2014 Whisper is never unloaded here (loaded once, kept forever), and SenseVoice/TitaNet's idle-unload-after-30-min is a single infrequent transition, not a hot cycling path. A subprocess boundary adds a stdin/stdout protocol, a cold-start-vs-latency measurement burden, and a second thing that can crash independently, for a risk class (repeated reload thrash) that the waterfall fix + 30-min timer already engineer away. Revisit only if empirical measurement (see next item) shows del/reassign-to-None doesn't actually return RSS on this machine for SenseVoice specifically \u2014 then escalate ONLY that one engine to a subprocess, not the whole architecture.",
+      "risk": "n/a \u2014 architectural choice, not a fix",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": false
+    },
+    {
+      "title": "Verify del actually drops RSS on macOS before trusting the Wave 2 idle-unload in production",
+      "detail": "One report (Runtime Specialist) correctly flagged that gc.collect() is theater but del/reassign-to-None plausibly works for large mmap-backed model weight allocations, though onnxruntime's arena allocator is known to retain scratch buffers. Before shipping Wave 2's SenseVoice idle-unload: throwaway script \u2014 load SenseVoice, snapshot `ps -o rss= -p $PID`, del/reassign to None, sleep 3s, snapshot RSS again. If the ~407MB drop is real, ship as-is. If RSS stays flat, that specific engine (only that one) escalates to a subprocess-per-engine model rather than retrofitting the whole architecture preemptively.",
+      "risk": "none \u2014 pure verification, ~15 min",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": false
+    },
+    {
+      "title": "Move the 6 cron jobs from the gateway's in-process 60s ticker to launchd StartCalendarInterval calling the already-existing `hermes cron tick`",
+      "detail": "Verified by the Reliability Engineer: `hermes cron tick` (hermes_cli/cron.py:186-189) already runs standalone with no gateway dependency, measured ~0.4s cold start. This is a reliability/blast-radius win (a wedged gateway can no longer silently skip a scheduled job), NOT a RAM win \u2014 the gateway (186MB) must stay warm 24/7 regardless for the 5-8s voice-escalation latency budget. Worth doing but explicitly not sold as a memory saving, and lower priority than the model-tiering work above since it's orthogonal to the stated RAM/disk goal.",
+      "risk": "low \u2014 reuses an already-exercised code path; main failure mode is forgetting to disable the old in-process ticker and double-firing a job",
+      "ram_saved_mb": 0,
+      "disk_saved_gb": 0,
+      "implement_now": false
+    }
+  ],
+  "dissents": [
+    "Idle-unload timeout for SenseVoice+TitaNet: council proposals ranged from 5 minutes (Architectural Engineer) to 20-30 minutes (Runtime Specialist) to 30 minutes hard floor (UX/Latency Advocate) to 'don't unload in-process at all, use a subprocess instead' (Reliability Engineer). The chair sets 30 minutes, siding with the UX/Latency Advocate's reasoning: real usage is bursty (45s follow-up window, natural conversational pauses), and a short timer risks unloading/reloading mid-session or between closely-spaced conversations, producing unpredictable per-turn latency that reads as worse than a fixed cost. 30 minutes is long enough to never trigger within a normal usage session yet short enough to recover RAM during genuinely idle stretches (overnight, workday absences). The Architectural Engineer's 5-minute proposal and Research Engineer's original framing are overruled as too aggressive for a masked-but-still-real reload-latency cost on the mention-trigger's enrichment step.",
+    "Single-process lazy-tiers vs. split-process 'brain' subprocess: the Reliability & DevOps Engineer argued for spawning SenseVoice+TitaNet as an on-demand subprocess over stdin/stdout rather than in-process idle-unload, citing real historical fragility of native session-state cycling. The chair overrules this for the default ship: the waterfall fix (gate SenseVoice/TitaNet behind name_mentioned()) plus a 30-min unload is a single infrequent transition, not a hot cycling path, so the risk class motivating the subprocess proposal doesn't apply here to the degree it would if these models were unloaded every few minutes. The subprocess architecture is not rejected outright \u2014 it's the documented escalation path if the RSS-verification step (ranked action above) shows del/reassign doesn't actually release memory for SenseVoice on this machine.",
+    "Quiet-hours deep tier (unloading Whisper 23:00-08:00): endorsed by one report (Jarvis-as-chief-of-staff) as the sole exception to 'never tier Whisper.' The chair defers rather than rejects this \u2014 it's plausible and low-blast-radius given nobody expects instant response at 3am, but every other report treats Whisper as an absolute do-not-touch, and re-arm-scheduling failure directly risks a missed 08:00 briefing. Held as an explicit opt-in flag for a later session once the simpler Wave 2 tiering has proven the idle-unload machinery trustworthy in practice.",
+    "Whether to bundle the security fixes (API keys, log rotation) into this same PR: the Security Advisor flagged these as pre-existing and technically out of scope for a RAM/disk optimization. The chair includes the API-key fix in Wave 1 (file's already open, near-zero marginal cost) but defers ear.log/history.json chmod+rotation to a separate, later pass since it's unrelated to any RAM/disk/reliability goal and shouldn't dilute this PR's reviewability."
+  ]
+}
