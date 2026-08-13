@@ -11,7 +11,7 @@ Search combines FTS5 full-text ranking with simple TF-IDF cosine similarity
 for semantic-ish matching. No external deps beyond stdlib.
 
 Usage:
-    from jarvis_memory import MemoryIndex
+    from jarvis_voice.jarvis_memory import MemoryIndex
     idx = MemoryIndex()
     idx.rebuild()                  # full re-index
     idx.search("market watch briefing", limit=5)

@@ -17,7 +17,7 @@ Features:
   - Health monitoring and fallback chain
 
 Usage:
-    from jarvis_brain import JarvisBrain
+    from jarvis_voice.jarvis_brain import JarvisBrain
     brain = JarvisBrain()
     response = brain.think("What's on my schedule today?")
 """

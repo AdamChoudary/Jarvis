@@ -8,7 +8,7 @@ Builds on Nemori's knowledge graph (entities + relations + facts) and adds:
   - Auto-sync with Obsidian vault
 
 Usage:
-    from jarvis_lightrag import LightRAG
+    from jarvis_voice.jarvis_lightrag import LightRAG
     rag = LightRAG()
     context = rag.context_for_query("what projects am I working on")
     neighbors = rag.get_neighbors("Jarvis")

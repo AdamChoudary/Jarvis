@@ -8,12 +8,11 @@ This script:
   4. Logs system status
 
 Usage:
-    python jarvis_v7_check.py
+    python -m jarvis_voice.jarvis_v7_check   (from voice-daemon/, with the package installed)
 """
 import json, os, sys, time
 
 HOME = os.path.expanduser("~")
-sys.path.insert(0, os.path.join(HOME, ".hermes", "jarvis-voice"))
 
 def check_import(name, module):
     try:
@@ -71,7 +70,7 @@ def main():
     # 4. Memory index stats
     print("\nMemory Index:")
     try:
-        from jarvis_memory_v7 import MemoryIndex
+        from .jarvis_memory_v7 import MemoryIndex
         idx = MemoryIndex()
         stats = idx.stats()
         print(f"  Documents: {stats['total_docs']}")
@@ -83,7 +82,7 @@ def main():
     # 5. Knowledge graph stats
     print("\nKnowledge Graph:")
     try:
-        from jarvis_lightrag import LightRAG
+        from .jarvis_lightrag import LightRAG
         rag = LightRAG()
         stats = rag.stats()
         print(f"  Entities: {stats['entities']}")
@@ -95,7 +94,7 @@ def main():
     # 6. Health check
     print("\nHealth:")
     try:
-        from jarvis_autonomy import AutonomyEngine
+        from .jarvis_autonomy import AutonomyEngine
         aut = AutonomyEngine()
         health = aut.health_check()
         disk = health.get("disk", {})

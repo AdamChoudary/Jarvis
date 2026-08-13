@@ -7,7 +7,7 @@ Components:
   3. Health Monitor — predictive failure detection and tiered recovery
 
 Usage:
-    from jarvis_autonomy import AutonomyEngine
+    from jarvis_voice.jarvis_autonomy import AutonomyEngine
     aut = AutonomyEngine()
     triggers = aut.check_triggers()
     health = aut.health_check()

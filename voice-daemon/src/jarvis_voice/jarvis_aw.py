@@ -2,7 +2,7 @@
 """ActivityWatch integration for Jarvis — query usage data from the AW server.
 
 Usage:
-    from jarvis_aw import ActivityWatch
+    from jarvis_voice.jarvis_aw import ActivityWatch
     aw = ActivityWatch()
     print(aw.today_summary())
     print(aw.top_apps(hours=4))

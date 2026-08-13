@@ -7,7 +7,7 @@ Extracts structured knowledge from voice conversations and writes to:
   3. Knowledge graph nodes (for LightRAG)
 
 Usage:
-    from jarvis_nemori import Nemori
+    from jarvis_voice.jarvis_nemori import Nemori
     nemori = Nemori()
     new_facts = nemori.distill(recent_messages, existing_memory)
 """

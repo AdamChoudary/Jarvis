@@ -9,7 +9,7 @@ Upgrades from v6:
   - New: source-specific weighting (vault > context > opencode > voice)
 
 Usage:
-    from jarvis_memory_v7 import MemoryIndex
+    from jarvis_voice.jarvis_memory_v7 import MemoryIndex
     idx = MemoryIndex()
     idx.rebuild()
     idx.search("what did we do with jarvis")
