@@ -6,7 +6,8 @@ Speaker.wait() hanging forever on every subsequent turn (a daemon-wide hang,
 not just a cosmetic glitch) — found by reading the code, verified here so it
 can never silently regress.
 
-Run: ~/.hermes/hermes-agent/venv/bin/python test_bargein.py
+Run (with the package installed, `pip install -e .` from voice-daemon/):
+    python tests/test_bargein.py
 """
 import sys, time
 

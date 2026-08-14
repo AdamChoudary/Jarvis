@@ -6,14 +6,14 @@ deadline), and that has nothing to do with this work. These checks prove the
 latency path itself, and the reflex path in particular is verified END TO END
 through the real dispatch() because a reflex hit never opens a socket.
 
-Run: ~/.hermes/hermes-agent/venv/bin/python test_wave1.py
+Run (with the package installed, `pip install -e .` from voice-daemon/):
+    python tests/test_wave1.py
 """
 import json
 import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Tags every turn this run logs to ram-log.jsonl with "source": "test" so
 # real-usage latency analysis (and the dashboard's own laneStats()) doesn't
 # average test fixtures in with production turns — found live-mixed together

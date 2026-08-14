@@ -5,7 +5,8 @@ speaker-to-mic acoustic path entirely. Proves the CAPTURE-AND-CONTINUE logic
 (the actual feature Sir asked for) works, independent of the RMS threshold's
 real-world acoustic calibration (which needs Sir's real voice to validate).
 
-Run: ~/.hermes/hermes-agent/venv/bin/python test_bargein_e2e.py
+Run (with the package installed, `pip install -e .` from voice-daemon/):
+    python tests/test_bargein_e2e.py
 """
 import queue, subprocess, sys, tempfile, threading, time, wave
 

@@ -2,10 +2,11 @@
 on speech that never mentions Jarvis, and still runs the full pipeline once it
 does. Council-approved 2026-07-18, soaked 48h, shipped 2026-07-20.
 
-Run: ~/.hermes/hermes-agent/venv/bin/python test_waterfall.py
+Run (with the package installed, `pip install -e .` from voice-daemon/):
+    python tests/test_waterfall.py
 """
 import sys
-sys.path.insert(0, "/Users/mac/.hermes/jarvis-voice")
+
 from jarvis_voice import jarvis_ear as je
 
 

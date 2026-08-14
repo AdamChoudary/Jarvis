@@ -10,6 +10,15 @@ Built as a Swift Package rather than an .xcodeproj because this machine
 only has the Command Line Tools installed, not full Xcode — `swift build`
 works fine for a SwiftUI app; `xcodebuild` does not without Xcode itself.
 
+## Requirements
+
+- macOS 14 (Sonoma) or later
+- Swift 5.9+ / Xcode 15+ Command Line Tools (`xcode-select --install`) — a
+  full Xcode install isn't required, just the toolchain
+- A running [`voice-daemon`](../voice-daemon/) to have any real data to show —
+  the app reads its state directly off disk (see [Data sources](#data-sources)
+  below) and displays empty states otherwise
+
 ## Tabs
 
 - **Space** — the memory graph: every indexed document (vault notes,
