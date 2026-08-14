@@ -1,44 +1,71 @@
 # Jarvis
 
-Project hub for the always-on Mac voice assistant and everything around it.
+An always-listening, J.A.R.V.I.S.-style voice assistant for the Mac, plus a
+native SwiftUI dashboard for watching it think.
+
+Say "Hey Jarvis" (or just mention its name in conversation) and it wakes up,
+transcribes locally, answers over a streaming cloud LLM chain with an offline
+fallback, speaks back, and remembers the conversation — semantically indexed,
+distilled into a knowledge graph, recalled only when actually relevant to what
+you're currently saying.
+
+## Components
+
+| | |
+|---|---|
+| **[`voice-daemon/`](voice-daemon/)** | The daemon itself. Python. Wake word, ambient transcription, memory, replies. |
+| **[`dashboard/`](dashboard/)** | Native macOS app (SwiftUI). Reads the daemon's real state straight off disk — no server. |
+
+## Features
+
+- **Wake word + name-mention trigger** — "Hey Jarvis" or just saying "Jarvis"/"Assistant" mid-conversation
+- **Local speech recognition** — mlx-whisper (Apple Silicon), with an emotion-aware pass (SenseVoice) and speaker ID (TitaNet) to tell the owner's voice from guests'
+- **Three-tier reasoning chain** — a fast cloud lane (OpenCode Zen), a stronger cloud lane (NVIDIA NIM), and a fully offline local model (MLX) if both cloud lanes are down
+- **Reflex table** — instant, LLM-free answers for common questions (time, battery, etc.) so they don't pay for a network round trip
+- **Semantic memory** — a searchable index (FTS + embeddings) over every past conversation, plus a knowledge-graph distillation pass (Nemori) that extracts durable facts instead of replaying raw transcripts
+- **Recall gate** — memory is only injected into a reply when the current turn actually needs it, not on every single turn
+- **Barge-in** — you can interrupt it mid-reply
+- **Hold-to-dictate** — a system-wide hotkey that transcribes speech directly into whatever app has focus
+- **Self-healing** — restarts itself under memory pressure or a dead audio stream, without needing you to notice
+
+## Requirements
+
+- **macOS**, Apple Silicon recommended (the local-model fallback and accelerated
+  transcription use Apple's MLX framework, which needs it — the rest of the
+  daemon runs fine on Intel too)
+- **Python 3.11+**
+- **Xcode 15+ / Swift 5.9+** (only if you're building the dashboard — the
+  Command Line Tools alone are enough, no full Xcode project needed)
+- **[ffmpeg](https://ffmpeg.org/)** and **[PortAudio](http://www.portaudio.com/)**
+  (e.g. `brew install ffmpeg portaudio`)
+- API keys for the cloud reasoning lanes: an **NVIDIA NIM** key
+  ([build.nvidia.com](https://build.nvidia.com/)) and an **OpenCode Zen** key
+  ([opencode.ai/zen](https://opencode.ai/zen)) — both have free tiers
+- Several **local model files** (~600MB total: Kokoro TTS, Silero VAD, GTCRN,
+  TitaNet, sherpa-onnx SenseVoice) that aren't bundled in this repo — see
+  [`voice-daemon/README.md`](voice-daemon/README.md#models) for what's needed
+- macOS permissions: **Microphone**, and **Accessibility** if you want
+  hold-to-dictate
+
+Full setup steps are in [`voice-daemon/README.md`](voice-daemon/README.md) and
+[`dashboard/README.md`](dashboard/README.md).
+
+## Project layout
 
 ```
 Jarvis/
-├── voice-daemon -> ~/.hermes/jarvis-voice   the live daemon (symlink, see below)
-├── dashboard/                               native SwiftUI Mac app
-├── reference/                               four public Jarvis projects, for study
-├── JARVIS-LANDSCAPE.md                      what they have, how their UIs are built
-└── IMPLEMENTATION-PLAN.md                   what we port, in what order
+├── voice-daemon/         the daemon — see voice-daemon/README.md
+│   ├── src/jarvis_voice/ the actual package
+│   ├── tests/
+│   ├── scripts/
+│   └── pyproject.toml
+├── dashboard/             the SwiftUI app — see dashboard/README.md
+│   └── Sources/JarvisDashboard/
+├── docs/dev-notes/       internal design/planning notes, kept for transparency
+├── LICENSE
+└── README.md              you are here
 ```
 
-## Why voice-daemon is a symlink
+## License
 
-`~/.hermes/jarvis-voice` is running right now under launchd (`com.jarvis.ear`), and the
-plist references that absolute path. Moving it would take the assistant offline until the
-plist was rewritten and reloaded. It is linked instead, so the whole project is navigable
-from one place without touching a live service. It is a full git repository in its own
-right.
-
-## The two components
-
-**voice-daemon** — Python. openWakeWord + Silero VAD + mlx-whisper for hearing,
-SenseVoice for emotion, TitaNet for speaker ID, a NIM/Zen/local-Qwen brain chain,
-Edge-TTS/Kokoro/say for speech. Barge-in, self-restart on memory pressure, dead-audio-
-stream recovery. Run `python jarvis_ear.py --selftest` to check it end to end.
-
-**dashboard** — SwiftUI, built with Swift Package Manager (no Xcode project, since this
-machine has only the Command Line Tools). `./build-app.sh` produces
-`~/Applications/Jarvis.app`: 804KB binary, ~1.8% CPU idle. Five tabs: the orrery memory
-view, activity, source browser, architecture docs, and settings. Reads Jarvis's real
-state directly off disk, read-only, no server.
-
-## reference/
-
-Shallow clones taken 2026-07-20, kept for study only. Nothing here is a dependency.
-
-- `sukeesh-jarvis` — CLI plugin assistant, deliberately non-AI, huge task breadth
-- `isair-jarvis` — 100% local voice AI, PyQt6 + Flask, the best architecture of the four
-- `ethanplusai-jarvis` — Mac butler with a Three.js orb and a click-through desktop overlay
-- `openjarvis` — Stanford local-first framework, Tauri + React + Rust
-
-See `JARVIS-LANDSCAPE.md` for the full analysis.
+[MIT](LICENSE)
