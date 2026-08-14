@@ -14,3 +14,6 @@ state.json
 *.mp3
 *.wav
 __pycache__/
+.env
+.venv/
+*.egg-info/

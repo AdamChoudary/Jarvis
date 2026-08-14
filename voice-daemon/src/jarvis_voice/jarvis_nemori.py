@@ -23,10 +23,12 @@ KB_PATH = os.path.join(HOME, ".hermes", "jarvis-voice", "knowledge-graph.db")
 # LLM endpoints for distillation
 SESSION = None
 NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-NIM_KEY = os.environ.get("NIM_API_KEY", "")
+NIM_KEY = os.environ.get("NVIDIA_API_KEY", "")
 NIM_MODEL = "nvidia/llama-3.1-nemotron-70b-instruct"
+# NOTE: this URL differs from jarvis_ear.py's ZEN_URL (opencode.ai/zen) — unverified
+# whether that's intentional (a distillation-specific endpoint) or stale; left as-is.
 ZEN_URL = "https://api.zen-llm.com/v1/chat/completions"
-ZEN_KEY = os.environ.get("ZEN_API_KEY", "")
+ZEN_KEY = os.environ.get("OPENCODE_ZEN_KEY", "")
 FAST_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 # ── Knowledge Graph Schema ───────────────────────────────────────────────────
